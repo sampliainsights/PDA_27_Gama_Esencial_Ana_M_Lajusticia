@@ -595,8 +595,6 @@ const CONFIG = {
   snapshotDate: '28 de octubre de 2026',
   // Solo se leen las columnas A a I de la hoja (de «Marca temporal» a «Sentimiento»)
   maxCols: 9,
-  // Personas que dicen no haber recibido o probado el producto: sus respuestas no valoran el producto y se excluyen del informe
-  notReceived: /no lo he probado|no lo he recibido|no me (lo |mo )?(han )?(dado|dieron)|no he recibido|no me ha llegado/,
   // Hoja de respuestas de Google Forms: las cabeceras son el texto de la pregunta, no un question_id
   attrs: [
     { k: 'glob', label: 'Valoración global',        short: 'Valoración global', art: 'La valoración global',      rx: /valoraci[oó]n global/i, q: '¿Cuál es tu valoración global de este producto?' },
@@ -623,7 +621,7 @@ const SENT_COLORS = { Positivo: C.dusk, Neutro: C.neutral, Negativo: C.rasp };
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const state = {
-  rows: [], headers: {}, source: '', liveErrors: [], excluded: 0,
+  rows: [], headers: {}, source: '', liveErrors: [],
   f: { compra: 'all', gen: 'all', age: 'all' },
   compare: true,
   vb: { q: '', sent: 'all', theme: null, limit: 12 }
@@ -759,10 +757,10 @@ function buildRows(matrix) {
   state.headers = Object.fromEntries(Object.entries(idx).map(([k, i]) => [k, heads[i]]));
 
   const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return (n >= 1 && n <= 5) ? n : null; };
-  const rows = []; state.excluded = 0;
+  const rows = [];
   matrix.slice(hi + 1).forEach(r => {
+    if (!r.some(v => String(v ?? '').trim() !== '')) return;
     const get = k => idx[k] == null ? '' : String(r[idx[k]] ?? '').trim();
-    if (CONFIG.notReceived && CONFIG.notReceived.test(norm(get('porque')))) { state.excluded++; return; }
     const o = { ts: get('ts'), porque: emptyAnswer(get('porque')) ? '' : get('porque'), cat: get('cat') };
     CONFIG.attrs.forEach(a => o[a.k] = num(get(a.k)));
     const cp = norm(get('compra'));
@@ -776,9 +774,9 @@ function buildRows(matrix) {
     const g = norm(get('gen')); o.gen = /^(f|mujer)/.test(g) ? 'Mujer' : /^(m|hombre)/.test(g) ? 'Hombre' : null;
     const age = parseInt(get('age'), 10);
     o.ageB = isNaN(age) ? null : (CONFIG.ageBands.find(([, lo, hi]) => age >= lo && age <= hi) || [null])[0];
-    if (CONFIG.attrs.some(a => o[a.k] != null) || o.compra) rows.push(o);
+    rows.push(o);
   });
-  if (!rows.length) throw new Error('No hay respuestas válidas');
+  if (!rows.length) throw new Error('No hay filas de datos');
   return rows;
 }
 
@@ -800,7 +798,7 @@ async function loadData() {
       const url = src.url(CONFIG.gid);
       try {
         const rows = buildRows(toMatrix(await fetchText(url)));
-        return { src, rows, excluded: state.excluded };
+        return { src, rows };
       } catch (e) {
         errors.push(src.name + ': ' + e.message);
         console.warn('[datos] ' + src.name + ' falló (' + url + '):', e.message);
@@ -809,7 +807,7 @@ async function loadData() {
     }));
     const best = tries.filter(Boolean).sort((a, b) => b.rows.length - a.rows.length)[0];
     if (best) {
-      state.rows = best.rows; state.excluded = best.excluded; state.source = 'live';
+      state.rows = best.rows; state.source = 'live';
       console.info('[datos] Fuente usada: ' + best.src.name + ' (' + best.rows.length + ' respuestas)');
       setStatus('live', `Datos en vivo de la hoja (${state.rows.length} respuestas${exNote()})`);
       return;
